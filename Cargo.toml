@@ -1,0 +1,10 @@
+[package]
+name = "easybench"
+version = "0.1.0"
+authors = ["Alex Sayers <alex.sayers@gmail.com>"]
+
+[lib]
+name = "easybench"
+path = "lib.rs"
+
+[dependencies]

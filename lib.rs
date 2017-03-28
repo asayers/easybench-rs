@@ -1,0 +1,247 @@
+/*!
+A lightweight benchmarking library which:
+
+* uses linear regression to screen off sources of constant error;
+* handles benchmarks which must mutate some state;
+* has a very simple API!
+
+It's inspired by [criterion], but doesn't do as much sophisticated analysis. Perhaps some day it
+will!
+
+[criterion]: https://hackage.haskell.org/package/criterion
+
+```
+use easybench::{bench,bench_env};
+
+# fn fib(n: usize) -> usize { 0 }
+#
+// Simple benchmarks are performed with `bench`.
+println!("fib 200: {}", bench(|| fib(200) ));
+println!("fib 500: {}", bench(|| fib(500) ));
+
+// If a function needs to mutate some state, use `bench_env`.
+println!("reverse: {}", bench_env(vec![1,2,3], |xs| xs.reverse()));
+println!("sort:    {}", bench_env(vec![1,2,3], |xs| xs.sort()));
+```
+
+Running the above yields the following results (make sure you compile with `--release`):
+
+```none
+fib 200:         38 ns   (R²=1.000, 26053498 iterations in 155 samples)
+fib 500:        109 ns   (R²=1.000, 9131585 iterations in 144 samples)
+reverse:          3 ns   (R²=0.998, 23684997 iterations in 154 samples)
+sort:             3 ns   (R²=0.999, 23684997 iterations in 154 samples)
+```
+
+## Caveat: pure functions
+
+Benchmarking pure functions involves a nasty gotcha which users should be aware of. Consider the
+following benchmarks:
+
+```
+# use easybench::{bench,bench_env};
+#
+# fn fib(n: usize) -> usize { 0 }
+#
+let fib_1 = bench(|| fib(500) );                     // fine
+let fib_2 = bench(|| { fib(500); } );                // spoiler: NOT fine
+let fib_3 = bench_env(0, |x| { *x = fib(500); } );   // also fine, but ugly
+# let _ = (fib_1, fib_2, fib_3);
+```
+
+The results are a little surprising:
+
+```none
+fib_1:        110 ns   (R²=1.000, 9131585 iterations in 144 samples)
+fib_2:          0 ns   (R²=1.000, 413289203 iterations in 184 samples)
+fib_3:        109 ns   (R²=1.000, 9131585 iterations in 144 samples)
+```
+
+Oh, `fib_2`, why do you lie? The answer is: because `fib(500)` is pure, and its return value is
+immediately thrown away, so the optimiser replaces the call with a no-op (which clocks in at 0 ns).
+
+What about the other two? `fib_1` works because the closure passed to `bench` returns the result of
+the `fib(500)` call. Easybench takes whatever your code returns and tricks the optimiser into
+thinking it's going to do something with it. In `fib_3`, we actually *do* use the return value - we
+store it in the benchmark's private mutable state. This works fine but looks a bit weird.
+
+The moral of the story: when benchmarking pure functions, make sure to return enough information to
+prevent the optimiser from eliminating code from your benchmark!
+
+## The benchmarking algorithm
+
+First, let me define "sample" and "iteration". An *iteration* is a single execution of your code. A
+*sample* is a measurement, during which your code may be run many times. That is: taking a sample
+means performing some number of iterations and measuring the total time.
+
+We begin by taking a sample and throwing away the results, in an effort to warm up some caches.
+
+Now we start collecting data. The first sample performs only 1 iteration, but as we continue taking
+samples we increase the number of iterations exponentially. We stop when a time limit is reached
+(currently 1 second).
+
+Next, we perform OLS regression on the resulting data. The gradient of the regression line is our
+measure of the time it takes to perform a single iteration of the benchmark. The R² value is a
+measure of how much noise there is in the data.
+*/
+
+use std::time::{Duration,Instant};
+use std::fmt::{self,Display,Formatter};
+
+#[derive(Debug)]
+/// Statistics for a benchmark run.
+pub struct Stats {
+    /// The gradient of the regression line.
+    ///
+    /// This gives us the time, in nanoseconds, per iteration.
+    pub ns_per_iter: f64,
+    /// The coefficient of determination, R².
+    ///
+    /// This is an indication of how noisy the benchmark was, where 1 is good and 0 is bad. Be
+    /// suspicious of values below 0.9.
+    pub goodness_of_fit: f64,
+    /// How many times the benchmarked code was actually run.
+    pub iterations: usize,
+    /// How many samples were taken (ie. how many times we allocated the environment and measured
+    /// the time).
+    pub samples: usize,
+}
+
+impl Display for Stats {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{:>10.0} ns   (R²={:.3}, {} iterations in {} samples)",
+            self.ns_per_iter, self.goodness_of_fit, self.iterations, self.samples)?;
+        Ok(())
+    }
+}
+
+// Each time we take a sample we increase the number of iterations:
+//      iters = ITER_SCALE_FACTOR ^ sample_no
+const ITER_SCALE_FACTOR: f64 = 1.1;
+
+// We try to spend this many seconds (roughly) in total on each benchmark.
+const BENCH_TIME_LIMIT_SECS: u64 = 1;
+
+/// Run a benchmark.
+///
+/// The return value of `f` is not used, but we trick the optimiser into thinking we're going to
+/// use it. Make sure to return enough information to prevent the optimiser from eliminating code
+/// from your benchmark! (See the module docs for more.)
+pub fn bench<F, O>(f: F) -> Stats where F: Fn() -> O {
+    bench_env(&(), |_| f() )
+}
+
+/// Run a benchmark with an environment.
+///
+/// The value `env` is a clonable prototype for the "benchmark environment". Each iteration
+/// recieves a freshly-cloned mutable copy of this environment. The time taken to clone the
+/// environment is not included in the results.
+///
+/// Nb: it's very possible that we will end up allocating many (>10,000) copies of `env` at the
+/// same time. Probably best to keep it small.
+///
+/// See `bench` and the module docs for more.
+pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Clone {
+    let take_sample = |iters: usize| -> f64 {
+        let mut xs = vec![env.clone();iters]; // Prepare the environments - one per iteration
+        let ts = Instant::now();              // Start the clock
+        for i in 0..iters {
+            let ref mut x = xs[i];            // Lookup the env for this iteration
+            pretend_to_use(f(x));             // Run the code and pretend to use the output
+        }
+        as_micros(ts.elapsed())
+    };
+
+    // Try to get the benchmark into the cache before we start.
+    let _ = take_sample(1);
+
+    // Collect some data.
+    let mut data = Vec::new();
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(BENCH_TIME_LIMIT_SECS) {
+        let iters = ITER_SCALE_FACTOR.powi(data.len() as i32).round() as usize;
+        data.push((iters, take_sample(iters)));
+    }
+
+    // Compute some stats
+    let (grad, r2) = regression(&data[..]);
+    Stats {
+        ns_per_iter: 1000f64 * grad,
+        goodness_of_fit: r2,
+        iterations: data.iter().map(|&(x,_)| x).sum(),
+        samples: data.len(),
+    }
+}
+
+/// Compute the OLS linear regression line for the given data set, returning the line's gradient
+/// and R².
+fn regression(data: &[(usize, f64)]) -> (f64, f64) {
+    let xbar: f64  = data.iter().map(|&(x,_)| (x  ) as f64 ).sum::<f64>() / data.len() as f64;
+    let ybar: f64  = data.iter().map(|&(_,y)| (y  )        ).sum::<f64>() / data.len() as f64;
+    let xxbar: f64 = data.iter().map(|&(x,_)| (x*x) as f64 ).sum::<f64>() / data.len() as f64;
+    let yybar: f64 = data.iter().map(|&(_,y)| (y*y)        ).sum::<f64>() / data.len() as f64;
+    let xybar: f64 = data.iter().map(|&(x,y)| (x as f64 *y)).sum::<f64>() / data.len() as f64;
+    let covar = xybar - (xbar * ybar);
+    let xvar = xxbar - (xbar * xbar);
+    let yvar = yybar - (ybar * ybar);
+    let gradient = covar / xvar;
+    let r2 = (covar * covar) / (xvar * yvar);
+    (gradient, r2)
+}
+
+// Warning: overflows possible. TODO: check for them.
+fn as_micros(x: Duration) -> f64 {
+    (x.as_secs() as f64 * 1_000_000.0) + (x.subsec_nanos() as f64 / 1_000.0)
+}
+
+// Stolen from `bencher`.
+//
+// NOTE: We don't have a proper black box in stable Rust. This is
+// a workaround implementation, that may have a too big performance overhead,
+// depending on operation, or it may fail to properly avoid having code
+// optimized out. It is good enough that it is used by default.
+//
+// A function that is opaque to the optimizer, to allow benchmarks to
+// pretend to use outputs to assist in avoiding dead-code
+// elimination.
+fn pretend_to_use<T>(dummy: T) -> T {
+    use std::mem;
+    use std::ptr;
+    unsafe {
+        let ret = ptr::read_volatile(&dummy);
+        mem::forget(dummy);
+        ret
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fib(n: usize) -> usize {
+        let mut i = 0; let mut sum = 0; let mut last = 0; let mut curr = 1usize;
+        while i < n - 1 {
+            sum = curr.wrapping_add(last);
+            last = curr;
+            curr = sum;
+            i += 1;
+        }
+        sum
+    }
+
+    // This is only here because doctests don't work with `--nocapture`.
+    #[test]
+    fn doctests_again() {
+        println!("fib 200: {}", bench(|| fib(200) ));
+        println!("fib 500: {}", bench(|| fib(500) ));
+        println!("reverse: {}", bench_env(vec![1,2,3], |xs| xs.reverse()));
+        println!("sort:    {}", bench_env(vec![1,2,3], |xs| xs.sort()));
+
+        // This is fine:
+        println!("fib 1: {}", bench(|| fib(500) ));
+        // This is NOT fine:
+        println!("fib 2: {}", bench(|| { fib(500); } ));
+        // This is also fine, but a bit weird:
+        println!("fib 3: {}", bench_env(0, |x| { *x = fib(500); } ));
+    }
+}
