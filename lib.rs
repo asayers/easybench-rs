@@ -13,7 +13,7 @@ will!
 ```
 use easybench::{bench,bench_env};
 
-# fn fib(n: usize) -> usize { 0 }
+# fn fib(_: usize) -> usize { 0 }
 #
 // Simple benchmarks are performed with `bench`.
 println!("fib 200: {}", bench(|| fib(200) ));
@@ -41,7 +41,7 @@ following benchmarks:
 ```
 # use easybench::{bench,bench_env};
 #
-# fn fib(n: usize) -> usize { 0 }
+# fn fib(_: usize) -> usize { 0 }
 #
 let fib_1 = bench(|| fib(500) );                     // fine
 let fib_2 = bench(|| { fib(500); } );                // spoiler: NOT fine
@@ -88,8 +88,15 @@ measure of how much noise there is in the data.
 use std::time::{Duration,Instant};
 use std::fmt::{self,Display,Formatter};
 
-#[derive(Debug)]
+// Each time we take a sample we increase the number of iterations:
+//      iters = ITER_SCALE_FACTOR ^ sample_no
+const ITER_SCALE_FACTOR: f64 = 1.1;
+
+// We try to spend this many seconds (roughly) in total on each benchmark.
+const BENCH_TIME_LIMIT_SECS: u64 = 1;
+
 /// Statistics for a benchmark run.
+#[derive(Debug)]
 pub struct Stats {
     /// The gradient of the regression line.
     ///
@@ -115,20 +122,13 @@ impl Display for Stats {
     }
 }
 
-// Each time we take a sample we increase the number of iterations:
-//      iters = ITER_SCALE_FACTOR ^ sample_no
-const ITER_SCALE_FACTOR: f64 = 1.1;
-
-// We try to spend this many seconds (roughly) in total on each benchmark.
-const BENCH_TIME_LIMIT_SECS: u64 = 1;
-
 /// Run a benchmark.
 ///
 /// The return value of `f` is not used, but we trick the optimiser into thinking we're going to
 /// use it. Make sure to return enough information to prevent the optimiser from eliminating code
 /// from your benchmark! (See the module docs for more.)
 pub fn bench<F, O>(f: F) -> Stats where F: Fn() -> O {
-    bench_env(&(), |_| f() )
+    bench_env((), |_| f() )
 }
 
 /// Run a benchmark with an environment.
