@@ -2,6 +2,11 @@
 name = "easybench"
 version = "0.1.0"
 authors = ["Alex Sayers <alex.sayers@gmail.com>"]
+description = "A lightweight benchmarking library"
+documentation = "https://docs.rs/easybench/"
+repository = "https://github.com/asayers/easybench-rs"
+readme = "README.md"
+keywords = ["benchmark"]
 license = "MIT OR Apache-2.0"
 
 [lib]
