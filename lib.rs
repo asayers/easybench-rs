@@ -5,8 +5,7 @@ A lightweight benchmarking library which:
 * handles benchmarks which must mutate some state;
 * has a very simple API!
 
-It's inspired by [criterion], but doesn't do as much sophisticated analysis. Perhaps some day it
-will!
+It's inspired by [criterion], but doesn't do as much sophisticated analysis.
 
 [criterion]: https://hackage.haskell.org/package/criterion
 
@@ -24,7 +23,7 @@ println!("reverse: {}", bench_env(vec![1,2,3], |xs| xs.reverse()));
 println!("sort:    {}", bench_env(vec![1,2,3], |xs| xs.sort()));
 ```
 
-Running the above yields the following results (make sure you compile with `--release`):
+Running the above yields the following results:
 
 ```none
 fib 200:         38 ns   (R²=1.000, 26053498 iterations in 155 samples)
@@ -33,7 +32,27 @@ reverse:          3 ns   (R²=0.998, 23684997 iterations in 154 samples)
 sort:             3 ns   (R²=0.999, 23684997 iterations in 154 samples)
 ```
 
-## Caveat: pure functions
+Easy! However, please read the caveats below before using.
+
+## Caveat 1: Harness overhead
+
+**TL;DR: compile with `--release`, and don't use `bench_env` if your benchmark can't tolerate a
+systematic cache miss.**
+
+How much overhead does easybench itself introduce? As mentioned above and explained below, we use
+the linear regression technique in order to eliminate any constant error involved with taking a
+sample. However, this technique doesn't prevent linear error from showing up - that is, if there's
+some work which easybench does every iteration, then it will be included in the results.
+
+In most cases, this work should be negligable (so long as you compile with `--release`). In the
+case of `bench` it amounts to incrementing the loop counter. In the case of `bench_env`, we also do
+a lookup into a big vector every iteration, in order to get the environment for that iteration.
+This may be more of a concern, depending on the code you're benchmarking.
+
+## Caveat 2: Pure functions
+
+**TL;DR: when benchmarking pure functions, return enough information to prevent the optimiser from
+eliminating code from your benchmark!**
 
 Benchmarking pure functions involves a nasty gotcha which users should be aware of. Consider the
 following benchmarks:
@@ -57,16 +76,17 @@ fib_2:          0 ns   (R²=1.000, 413289203 iterations in 184 samples)
 fib_3:        109 ns   (R²=1.000, 9131585 iterations in 144 samples)
 ```
 
-Oh, `fib_2`, why do you lie? The answer is: because `fib(500)` is pure, and its return value is
-immediately thrown away, so the optimiser replaces the call with a no-op (which clocks in at 0 ns).
+Oh, `fib_2`, why do you lie? The answer is: `fib(500)` is pure, and its return value is immediately
+thrown away, so the optimiser replaces the call with a no-op (which clocks in at 0 ns).
 
-What about the other two? `fib_1` works because the closure passed to `bench` returns the result of
-the `fib(500)` call. Easybench takes whatever your code returns and tricks the optimiser into
-thinking it's going to do something with it. In `fib_3`, we actually *do* use the return value - we
-store it in the benchmark's private mutable state. This works fine but looks a bit weird.
+What about the other two? `fib_1` looks very similar, with one exception: the closure which we're
+benchmarking returns the result of the `fib(500)` call. When it runs your code, easybench takes the
+return value and tricks the optimiser into thinking it's going to use it for something, before
+throwing it away. This is why `fib_1` is safe from having code accidentally eliminated.
 
-The moral of the story: when benchmarking pure functions, make sure to return enough information to
-prevent the optimiser from eliminating code from your benchmark!
+In the case of `fib_3`, we actually *do* use the return value: each iteration we take the result of
+`fib(500)` and store it in the iteration's environment. This has the desired effect, but looks a
+bit weird.
 
 ## The benchmarking algorithm
 
