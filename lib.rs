@@ -93,9 +93,9 @@ bit weird.
 
 **TL;DR: Make sure your code takes less than a millisecond to run.**
 
-Each benchmark collects data for 1 second. This means that, in order to collect a statistically
-significant amount of data, your code should run much faster than this. In particular, if your code
-takes longer than 1 second to run, the benchmark will actually panic.
+Each benchmark collects data for 1 second. This means that in order to collect a statistically
+significant amount of data, your code should run much faster than this. In fact, if we don't manage
+to take a least 3 samples, easybench will actually panic!
 
 When inspecting the results, make sure things looks statistically significant. In particular:
 
@@ -113,8 +113,8 @@ iterations and measuring the total time.
 The first sample we take performs only 1 iteration, but as we continue taking samples we increase
 the number of iterations exponentially. We stop when a time limit is reached (currently 1 second).
 
-Next, we perform OLS regression on the resulting data. The gradient of the regression line is our
-measure of the time it takes to perform a single iteration of the benchmark. The R² value is a
+Next, we perform OLS linear regression on the resulting data. The gradient of the regression line
+tells us how long it takes to perform a single iteration of the benchmark. The R² value is a
 measure of how much noise there is in the data.
 */
 
@@ -166,7 +166,7 @@ pub fn bench<F, O>(f: F) -> Stats where F: Fn() -> O {
 /// Run a benchmark with an environment.
 ///
 /// The value `env` is a clonable prototype for the "benchmark environment". Each iteration
-/// recieves a freshly-cloned mutable copy of this environment. The time taken to clone the
+/// receives a freshly-cloned mutable copy of this environment. The time taken to clone the
 /// environment is not included in the results.
 ///
 /// Nb: it's very possible that we will end up allocating many (>10,000) copies of `env` at the
@@ -239,11 +239,9 @@ fn as_micros(x: Duration) -> f64 {
 // pretend to use outputs to assist in avoiding dead-code
 // elimination.
 fn pretend_to_use<T>(dummy: T) -> T {
-    use std::mem;
-    use std::ptr;
     unsafe {
-        let ret = ptr::read_volatile(&dummy);
-        mem::forget(dummy);
+        let ret = ::std::ptr::read_volatile(&dummy);
+        ::std::mem::forget(dummy);
         ret
     }
 }
