@@ -279,6 +279,8 @@ fn pretend_to_use<T>(dummy: T) -> T {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
+    use std::time::Duration;
 
     fn fib(n: usize) -> usize {
         let mut i = 0; let mut sum = 0; let mut last = 0; let mut curr = 1usize;
@@ -292,7 +294,7 @@ mod tests {
     }
 
     // This is only here because doctests don't work with `--nocapture`.
-    #[test]
+    #[test] #[ignore]
     fn doctests_again() {
         println!("fib 200: {}", bench(|| fib(200) ));
         println!("fib 500: {}", bench(|| fib(500) ));
@@ -305,5 +307,15 @@ mod tests {
         println!("fib 2: {}", bench(|| { fib(500); } ));
         // This is also fine, but a bit weird:
         println!("fib 3: {}", bench_env(0, |x| { *x = fib(500); } ));
+    }
+
+    #[test]
+    fn very_quick() {
+        println!("{}", bench(|| {}));
+    }
+
+    #[test] #[should_panic]
+    fn very_slow() {
+        bench(|| thread::sleep(Duration::from_millis(500)));
     }
 }
