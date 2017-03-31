@@ -198,7 +198,7 @@ pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Cl
     // Compute some stats
     let (grad, r2) = regression(&data[..]);
     Stats {
-        ns_per_iter: 1000f64 * grad,
+        ns_per_iter: grad,
         goodness_of_fit: r2,
         iterations: data.iter().map(|&(x,_)| x).sum(),
         samples: data.len(),
@@ -206,26 +206,29 @@ pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Cl
 }
 
 /// Compute the OLS linear regression line for the given data set, returning the line's gradient
-/// and R².
+/// and R². Requires at least 2 samples.
 fn regression(data: &[(usize, Duration)]) -> (f64, f64) {
-    assert!(data.len() > 1, "The dataset contains only one sample. Can't fit a regression line to that!");
-    let data: Vec<(f64, f64)> = data.iter().map(|&(x,y)| (x as f64, as_micros(y))).collect();
-    let xbar  = data.iter().map(|&(x,_)| x  ).sum::<f64>() / data.len() as f64;
-    let ybar  = data.iter().map(|&(_,y)| y  ).sum::<f64>() / data.len() as f64;
-    let xxbar = data.iter().map(|&(x,_)| x*x).sum::<f64>() / data.len() as f64;
-    let yybar = data.iter().map(|&(_,y)| y*y).sum::<f64>() / data.len() as f64;
-    let xybar = data.iter().map(|&(x,y)| x*y).sum::<f64>() / data.len() as f64;
-    let covar = xybar - (xbar * ybar);
-    let xvar  = xxbar - (xbar * xbar);
-    let yvar  = yybar - (ybar * ybar);
-    let gradient = covar / xvar;
-    let r2 = (covar * covar) / (xvar * yvar);
+    assert!(data.len() > 1, "The dataset contains only {} sample(s) - we can't fit a regression \
+            line to that! Try making your benchmark smaller.", data.len());
+    let data: Vec<(u64, u64)> = data.iter().map(|&(x,y)| (x as u64, as_nanos(y))).collect();
+    let n = data.len() as f64;
+    let nxbar  = data.iter().map(|&(x,_)| x  ).sum::<u64>(); // iter_time > 5e-11 ns
+    let nybar  = data.iter().map(|&(_,y)| y  ).sum::<u64>(); // TIME_LIMIT < 2 ^ 64 ns
+    let nxxbar = data.iter().map(|&(x,_)| x*x).sum::<u64>(); // num_iters < 13_000_000_000
+    let nyybar = data.iter().map(|&(_,y)| y*y).sum::<u64>(); // TIME_LIMIT < 4.3 e9 ns
+    let nxybar = data.iter().map(|&(x,y)| x*y).sum::<u64>();
+    let ncovar = nxybar as f64 - ((nxbar * nybar) as f64 / n);
+    let nxvar  = nxxbar as f64 - ((nxbar * nxbar) as f64 / n);
+    let nyvar  = nyybar as f64 - ((nybar * nybar) as f64 / n);
+    let gradient = ncovar / nxvar;
+    let r2 = (ncovar * ncovar) / (nxvar * nyvar);
     (gradient, r2)
 }
 
-// Warning: overflows possible. TODO: check for them.
-fn as_micros(x: Duration) -> f64 {
-    (x.as_secs() as f64 * 1_000_000.0) + (x.subsec_nanos() as f64 / 1_000.0)
+// Panics if x is longer than 584 years (1.8e10 seconds)
+fn as_nanos(x: Duration) -> u64 {
+    x.as_secs().checked_mul(1_000_000_000).expect("overflow: Duration was longer than 584 years")
+        .checked_add(x.subsec_nanos() as u64).unwrap()
 }
 
 // Stolen from `bencher`.
