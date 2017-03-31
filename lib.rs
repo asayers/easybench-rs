@@ -174,29 +174,26 @@ pub fn bench<F, O>(f: F) -> Stats where F: Fn() -> O {
 ///
 /// See `bench` and the module docs for more.
 pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Clone {
-    let take_sample = |iters: usize| -> f64 {
-        let mut xs = vec![env.clone();iters]; // Prepare the environments - one per iteration
-        let ts = Instant::now();              // Start the clock
-        for i in 0..iters {
-            let ref mut x = xs[i];            // Lookup the env for this iteration
-            pretend_to_use(f(x));             // Run the code and pretend to use the output
-        }
-        as_micros(ts.elapsed())
-    };
-
     let mut data = Vec::new();
     let bench_start = Instant::now(); // The time we started the benchmark (not used in results)
-
-    // If the first iter in a sample is consistently slow, that's fine - that's why we do the
-    // linear regression. If the first sample is slower than the rest, however, that's not fine. So
-    // let's make an effort to get take_sample into some caches.
-    let _ = take_sample(1);
 
     // Collect data until BENCH_TIME_LIMIT_SECS is reached.
     while bench_start.elapsed() < Duration::from_secs(BENCH_TIME_LIMIT_SECS) {
         let iters = ITER_SCALE_FACTOR.powi(data.len() as i32).round() as usize;
-        data.push((iters, take_sample(iters)));
+        let mut xs = vec![env.clone();iters]; // Prepare the environments - one per iteration
+        let iter_start = Instant::now();      // Start the clock
+        for i in 0..iters {
+            let ref mut x = xs[i];            // Lookup the env for this iteration
+            pretend_to_use(f(x));             // Run the code and pretend to use the output
+        }
+        let time = iter_start.elapsed();
+        data.push((iters, time));
     }
+
+    // If the first iter in a sample is consistently slow, that's fine - that's why we do the
+    // linear regression. If the first sample is slower than the rest, however, that's not fine.
+    // Therefore, we discard the first sample as a cache-warming exercise.
+    data.remove(0);
 
     // Compute some stats
     let (grad, r2) = regression(&data[..]);
@@ -210,16 +207,17 @@ pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Cl
 
 /// Compute the OLS linear regression line for the given data set, returning the line's gradient
 /// and R².
-fn regression(data: &[(usize, f64)]) -> (f64, f64) {
+fn regression(data: &[(usize, Duration)]) -> (f64, f64) {
     assert!(data.len() > 1, "The dataset contains only one sample. Can't fit a regression line to that!");
-    let xbar: f64  = data.iter().map(|&(x,_)| (x  ) as f64 ).sum::<f64>() / data.len() as f64;
-    let ybar: f64  = data.iter().map(|&(_,y)| (y  )        ).sum::<f64>() / data.len() as f64;
-    let xxbar: f64 = data.iter().map(|&(x,_)| (x*x) as f64 ).sum::<f64>() / data.len() as f64;
-    let yybar: f64 = data.iter().map(|&(_,y)| (y*y)        ).sum::<f64>() / data.len() as f64;
-    let xybar: f64 = data.iter().map(|&(x,y)| (x as f64 *y)).sum::<f64>() / data.len() as f64;
+    let data: Vec<(f64, f64)> = data.iter().map(|&(x,y)| (x as f64, as_micros(y))).collect();
+    let xbar  = data.iter().map(|&(x,_)| x  ).sum::<f64>() / data.len() as f64;
+    let ybar  = data.iter().map(|&(_,y)| y  ).sum::<f64>() / data.len() as f64;
+    let xxbar = data.iter().map(|&(x,_)| x*x).sum::<f64>() / data.len() as f64;
+    let yybar = data.iter().map(|&(_,y)| y*y).sum::<f64>() / data.len() as f64;
+    let xybar = data.iter().map(|&(x,y)| x*y).sum::<f64>() / data.len() as f64;
     let covar = xybar - (xbar * ybar);
-    let xvar = xxbar - (xbar * xbar);
-    let yvar = yybar - (ybar * ybar);
+    let xvar  = xxbar - (xbar * xbar);
+    let yvar  = yybar - (ybar * ybar);
     let gradient = covar / xvar;
     let r2 = (covar * covar) / (xvar * yvar);
     (gradient, r2)
