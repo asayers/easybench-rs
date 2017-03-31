@@ -1,11 +1,12 @@
 /*!
-A lightweight benchmarking library which:
+A lightweight micro-benchmarking library which:
 
 * uses linear regression to screen off sources of constant error;
 * handles benchmarks which must mutate some state;
 * has a very simple API!
 
-It's inspired by [criterion], but doesn't do as much sophisticated analysis.
+Easybench is optimised for benchmarks which have a running time in the range 1ns..1ms. It's
+inspired by [criterion], but doesn't do as much sophisticated analysis.
 
 [criterion]: https://hackage.haskell.org/package/criterion
 
@@ -88,17 +89,29 @@ In the case of `fib_3`, we actually *do* use the return value: each iteration we
 `fib(500)` and store it in the iteration's environment. This has the desired effect, but looks a
 bit weird.
 
+## Caveat 3: Sufficient data
+
+**TL;DR: Make sure your code takes less than a millisecond to run.**
+
+Each benchmark collects data for 1 second. This means that, in order to collect a statistically
+significant amount of data, your code should run much faster than this. In particular, if your code
+takes longer than 1 second to run, the benchmark will actually panic.
+
+When inspecting the results, make sure things looks statistically significant. In particular:
+
+* make sure the number of samples is big enough (>100 is probably OK);
+* make sure the R² isn't suspiciously low. It's easy to get a high R² value with only a few
+  samples, so the definition of "suspiciously low" depends on how many samples were taken (>0.9 is
+  probably OK though).
+
 ## The benchmarking algorithm
 
-First, let me define "sample" and "iteration". An *iteration* is a single execution of your code. A
-*sample* is a measurement, during which your code may be run many times. That is: taking a sample
-means performing some number of iterations and measuring the total time.
+An *iteration* is a single execution of your code. A *sample* is a measurement, during which your
+code may be run many times. In other words: taking a sample means performing some number of
+iterations and measuring the total time.
 
-We begin by taking a sample and throwing away the results, in an effort to warm up some caches.
-
-Now we start collecting data. The first sample performs only 1 iteration, but as we continue taking
-samples we increase the number of iterations exponentially. We stop when a time limit is reached
-(currently 1 second).
+The first sample we take performs only 1 iteration, but as we continue taking samples we increase
+the number of iterations exponentially. We stop when a time limit is reached (currently 1 second).
 
 Next, we perform OLS regression on the resulting data. The gradient of the regression line is our
 measure of the time it takes to perform a single iteration of the benchmark. The R² value is a
