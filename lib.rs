@@ -3,10 +3,12 @@ A lightweight micro-benchmarking library which:
 
 * uses linear regression to screen off sources of constant error;
 * handles benchmarks which must mutate some state;
-* has a very simple API!
+* `cloc`s in at under 100 lines of code with no dependencies;
+* has an eponymously simple API!
 
-Easybench is optimised for benchmarks which have a running time in the range 1ns..1ms. It's
-inspired by [criterion], but doesn't do as much sophisticated analysis.
+Easybench is optimised for benchmarks with a running time of more than a nanosecond but less than a
+millisecond. It's inspired by [criterion], but doesn't do the sophisticated analysis (no HTML
+output).
 
 [criterion]: https://hackage.haskell.org/package/criterion
 
@@ -33,27 +35,66 @@ reverse:         54 ns   (R²=0.999, 5669992 iterations in 138 samples)
 sort:            93 ns   (R²=1.000, 4685942 iterations in 136 samples)
 ```
 
-Easy! However, please read the caveats below before using.
+Easy! However, please read the [caveats](#caveats) below before using.
+
+# Benchmarking algorithm
+
+An *iteration* is a single execution of your code. A *sample* is a measurement, during which your
+code may be run many times. In other words: taking a sample means performing some number of
+iterations and measuring the total time.
+
+The first sample we take performs only 1 iteration, but as we continue taking samples we increase
+the number of iterations exponentially. We stop when a time limit is reached (currently 1 second).
+
+Next, we perform OLS linear regression on the resulting data. The gradient of the regression line
+tells us how long it takes to perform a single iteration of the benchmark. The R² value is a
+measure of how much noise there is in the data.
+
+# Caveats
 
 ## Caveat 1: Harness overhead
 
-**TL;DR: compile with `--release`, and don't use `bench_env` if your benchmark can't tolerate a
-systematic cache miss.**
+**TL;DR: compile with `--release`, and expect worst-case overhead of a few nanoseconds**
 
-How much overhead does easybench itself introduce? As mentioned above and explained below, we use
-the linear regression technique in order to eliminate any constant error involved with taking a
-sample. However, this technique doesn't prevent linear error from showing up - that is, if there's
-some work which easybench does every iteration, then it will be included in the results.
+How much overhead does easybench itself introduce? As explained above, we use linear regression to
+eliminate any constant error involved with taking a sample. However, this technique doesn't prevent
+linear error from showing up - that is, if there's some work which easybench does every iteration,
+then it will be included in the results.
 
-In most cases, this work should be negligable (so long as you compile with `--release`). In the
-case of `bench` it amounts to incrementing the loop counter. In the case of `bench_env`, we also do
-a lookup into a big vector every iteration, in order to get the environment for that iteration.
-This may be more of a concern, depending on the code you're benchmarking.
+If your benchmark takes more than a nanosecond to run, and you compile with `--release`, this work
+will typically be negligable:
 
-## Caveat 2: Pure functions
+* In the case of `bench` it amounts to incrementing the loop counter, plus the [cost of
+  `black_box`](#bonus-caveat-black-box).
+* In the case of `bench_env`, we also do a lookup into a big vector in order to get the environment
+  for that iteration. If you're really unlucky, this could amount to a systematic cache miss, which
+  would affect the results by a few nanoseconds. This is an unlikely worst-case, but it's best to
+  be aware of the possibility.
 
-**TL;DR: when benchmarking pure functions, return enough information to prevent the optimiser from
-eliminating code from your benchmark!**
+If you're concerned at all about overhead, please take a look at [the inner loop of
+`bench_env`][source]. The code is not scary.
+
+[source]: src/easybench/lib.rs.html#197-208
+
+## Caveat 2: Sufficient data
+
+**TL;DR: measurements of code which takes more than a millisecond to run are not reliable**
+
+Each benchmark collects data for 1 second. This means that in order to collect a statistically
+significant amount of data, your code should run much faster than this. In fact, if we don't manage
+to take a least 3 samples, easybench will actually panic!
+
+When inspecting the results, make sure things looks statistically significant. In particular:
+
+* Make sure the number of samples is big enough. More than 100 is probably OK.
+* Make sure the R² isn't suspiciously low. It's easy to get a high R² value when the number of
+  samples is small, so unfortunately the definition of "suspiciously low" depends on how many
+  samples were taken.  As a rule of thumb, expect values greater than 0.99.
+
+## Caveat 3: Pure functions
+
+**TL;DR: return enough information to prevent the optimiser from eliminating code from your
+benchmark**
 
 Benchmarking pure functions involves a nasty gotcha which users should be aware of. Consider the
 following benchmarks:
@@ -89,33 +130,19 @@ In the case of `fib_3`, we actually *do* use the return value: each iteration we
 `fib(500)` and store it in the iteration's environment. This has the desired effect, but looks a
 bit weird.
 
-## Caveat 3: Sufficient data
+## Bonus caveat: Black box
 
-**TL;DR: Make sure your code takes less than a millisecond to run.**
+The function which easybench uses to trick the optimiser (`black_box`) is stolen from [bencher],
+which [states]:
 
-Each benchmark collects data for 1 second. This means that in order to collect a statistically
-significant amount of data, your code should run much faster than this. In fact, if we don't manage
-to take a least 3 samples, easybench will actually panic!
+[bencher]: https://docs.rs/bencher/
+[states]: https://docs.rs/bencher/0.1.2/bencher/fn.black_box.html
 
-When inspecting the results, make sure things looks statistically significant. In particular:
+> NOTE: We don't have a proper black box in stable Rust. This is a workaround implementation, that
+> may have a too big performance overhead, depending on operation, or it may fail to properly avoid
+> having code optimized out. It is good enough that it is used by default.
 
-* make sure the number of samples is big enough (>100 is probably OK);
-* make sure the R² isn't suspiciously low. It's easy to get a high R² value with only a few
-  samples, so the definition of "suspiciously low" depends on how many samples were taken (>0.9 is
-  probably OK though).
-
-## The benchmarking algorithm
-
-An *iteration* is a single execution of your code. A *sample* is a measurement, during which your
-code may be run many times. In other words: taking a sample means performing some number of
-iterations and measuring the total time.
-
-The first sample we take performs only 1 iteration, but as we continue taking samples we increase
-the number of iterations exponentially. We stop when a time limit is reached (currently 1 second).
-
-Next, we perform OLS linear regression on the resulting data. The gradient of the regression line
-tells us how long it takes to perform a single iteration of the benchmark. The R² value is a
-measure of how much noise there is in the data.
+However, it works well enough in my experience.
 */
 
 use std::time::{Duration,Instant};
