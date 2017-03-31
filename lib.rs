@@ -137,8 +137,7 @@ pub struct Stats {
 impl Display for Stats {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{:>10.0} ns   (R²={:.3}, {} iterations in {} samples)",
-            self.ns_per_iter, self.goodness_of_fit, self.iterations, self.samples)?;
-        Ok(())
+            self.ns_per_iter, self.goodness_of_fit, self.iterations, self.samples)
     }
 }
 
@@ -172,13 +171,16 @@ pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Cl
         as_micros(ts.elapsed())
     };
 
-    // Try to get the benchmark into the cache before we start.
+    let mut data = Vec::new();
+    let bench_start = Instant::now(); // The time we started the benchmark (not used in results)
+
+    // If the first iter in a sample is consistently slow, that's fine - that's why we do the
+    // linear regression. If the first sample is slower than the rest, however, that's not fine. So
+    // let's make an effort to get take_sample into some caches.
     let _ = take_sample(1);
 
-    // Collect some data.
-    let mut data = Vec::new();
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(BENCH_TIME_LIMIT_SECS) {
+    // Collect data until BENCH_TIME_LIMIT_SECS is reached.
+    while bench_start.elapsed() < Duration::from_secs(BENCH_TIME_LIMIT_SECS) {
         let iters = ITER_SCALE_FACTOR.powi(data.len() as i32).round() as usize;
         data.push((iters, take_sample(iters)));
     }
@@ -196,6 +198,7 @@ pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Cl
 /// Compute the OLS linear regression line for the given data set, returning the line's gradient
 /// and R².
 fn regression(data: &[(usize, f64)]) -> (f64, f64) {
+    assert!(data.len() > 1, "The dataset contains only one sample. Can't fit a regression line to that!");
     let xbar: f64  = data.iter().map(|&(x,_)| (x  ) as f64 ).sum::<f64>() / data.len() as f64;
     let ybar: f64  = data.iter().map(|&(_,y)| (y  )        ).sum::<f64>() / data.len() as f64;
     let xxbar: f64 = data.iter().map(|&(x,_)| (x*x) as f64 ).sum::<f64>() / data.len() as f64;
