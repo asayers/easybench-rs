@@ -163,7 +163,7 @@ const ITER_SCALE_FACTOR: f64 = 1.1;
 const BENCH_TIME_LIMIT_SECS: u64 = 1;
 
 /// Statistics for a benchmark run.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Stats {
     /// The time, in nanoseconds, per iteration. If the benchmark generated fewer than 2 samples in
     /// the allotted time then this will be NaN.
@@ -254,6 +254,10 @@ pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Cl
 
 /// Compute the OLS linear regression line for the given data set, returning the line's gradient
 /// and R². Requires at least 2 samples.
+//
+// Overflows:
+//
+// * sum(x * x): num_samples <= 0.5 * log_k (1 + 2 ^ 64 (FACTOR - 1))
 fn regression(data: &[(usize, Duration)]) -> (f64, f64) {
     if data.len() < 2 {
         return (f64::NAN, f64::NAN);
@@ -279,7 +283,7 @@ fn as_nanos(x: Duration) -> u64 {
         .checked_add(x.subsec_nanos() as u64).unwrap()
 }
 
-// Stolen from `bencher`.
+// Stolen from `bencher`, where it's known as `black_box`.
 //
 // NOTE: We don't have a proper black box in stable Rust. This is
 // a workaround implementation, that may have a too big performance overhead,
