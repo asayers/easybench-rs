@@ -1,14 +1,13 @@
 /*!
 A lightweight micro-benchmarking library which:
 
-* uses linear regression to screen off sources of constant error;
-* handles benchmarks which must mutate some state;
-* `cloc`s in at under 100 lines of code with no dependencies;
-* has an eponymously simple API!
+* uses linear regression to screen off constant error;
+* handles benchmarks which mutate state;
+* is very easy to use!
 
-Easybench is optimised for benchmarks with a running time of more than a nanosecond but less than a
-millisecond. It's inspired by [criterion], but doesn't do the sophisticated analysis (no HTML
-output).
+Easybench is designed for benchmarks with a running time in the range `1 ns < x < 1 ms` - results
+may be unreliable if benchmarks are very quick or very slow. It's inspired by [criterion], but
+doesn't do as much sophisticated analysis (no outlier detection, no HTML output).
 
 [criterion]: https://hackage.haskell.org/package/criterion
 
@@ -44,57 +43,66 @@ code may be run many times. In other words: taking a sample means performing som
 iterations and measuring the total time.
 
 The first sample we take performs only 1 iteration, but as we continue taking samples we increase
-the number of iterations exponentially. We stop when a time limit is reached (currently 1 second).
+the number of iterations exponentially. We stop when a global time limit is reached (currently 1
+second).
 
-Next, we perform OLS linear regression on the resulting data. The gradient of the regression line
-tells us how long it takes to perform a single iteration of the benchmark. The R² value is a
-measure of how much noise there is in the data.
+If a benchmark must mutate some state while running, before taking a sample `n` copies of the
+initial state are prepared, where `n` is the number of iterations in that sample.
+
+Once we have the data, we perform OLS linear regression to find out how the sample time varies with
+the number of iterations in the sample. The gradient of the regression line tells us how long it
+takes to perform a single iteration of the benchmark. The R² value is a measure of how much noise
+there is in the data.
 
 # Caveats
 
 ## Caveat 1: Harness overhead
 
-**TL;DR: compile with `--release`, and expect worst-case overhead of a few nanoseconds**
+**TL;DR: Compile with `--release`; the overhead is likely to be within the noise of your
+benchmark.**
 
-How much overhead does easybench itself introduce? As explained above, we use linear regression to
-eliminate any constant error involved with taking a sample. However, this technique doesn't prevent
-linear error from showing up - that is, if there's some work which easybench does every iteration,
-then it will be included in the results.
+Any work which easybench does once-per-sample is ignored (this is the purpose of the linear
+regression technique described above). However, work which is done once-per-iteration *will* be
+counted in the final times.
 
-If your benchmark takes more than a nanosecond to run, and you compile with `--release`, this work
-will typically be negligable:
+* In the case of [`bench`] this amounts to incrementing the loop counter and [copying the return
+  value](#bonus-caveat-black-box).
+* In the case of [`bench_env`], we also do a lookup into a big vector in order to get the
+  environment for that iteration.
+* If you compile your program unoptimised, there may be additional overhead.
 
-* In the case of `bench` it amounts to incrementing the loop counter, plus the [cost of
-  `black_box`](#bonus-caveat-black-box).
-* In the case of `bench_env`, we also do a lookup into a big vector in order to get the environment
-  for that iteration. If you're really unlucky, this could amount to a systematic cache miss, which
-  would affect the results by a few nanoseconds. This is an unlikely worst-case, but it's best to
-  be aware of the possibility.
+[`bench`]: fn.bench.html
+[`bench_env`]: fn.bench_env.html
 
-If you're concerned at all about overhead, please take a look at [the inner loop of
-`bench_env`][source]. The code is not scary.
+The cost of the above operations depend on the details of your benchmark; namely: (1) how large is
+the return value? and (2) does the benchmark evict the environment vector from the CPU cache? In
+practice, these criteria are only satisfied by longer-running benchmarks, making these effects hard
+to measure.
 
-[source]: src/easybench/lib.rs.html#197-208
+If you have concerns about the results you're seeing, please take a look at [the inner loop of
+`bench_env`][source]. The whole library `cloc`s in at under 100 lines of code, so it's pretty easy
+to read.
+
+[source]: ../src/easybench/lib.rs.html#229-237
 
 ## Caveat 2: Sufficient data
 
-**TL;DR: measurements of code which takes more than a millisecond to run are not reliable**
+**TL;DR: Measurements are unreliable when code takes too long (> 1 ms) to run.**
 
 Each benchmark collects data for 1 second. This means that in order to collect a statistically
-significant amount of data, your code should run much faster than this. In fact, if we don't manage
-to take a least 3 samples, easybench will actually panic!
+significant amount of data, your code should run much faster than this.
 
-When inspecting the results, make sure things looks statistically significant. In particular:
+When inspecting the results, make sure things look statistically significant. In particular:
 
 * Make sure the number of samples is big enough. More than 100 is probably OK.
-* Make sure the R² isn't suspiciously low. It's easy to get a high R² value when the number of
+* Make sure the R² isn't suspiciously low. It's easy to achieve a high R² value when the number of
   samples is small, so unfortunately the definition of "suspiciously low" depends on how many
   samples were taken.  As a rule of thumb, expect values greater than 0.99.
 
 ## Caveat 3: Pure functions
 
-**TL;DR: return enough information to prevent the optimiser from eliminating code from your
-benchmark**
+**TL;DR: Return enough information to prevent the optimiser from eliminating code from your
+benchmark.**
 
 Benchmarking pure functions involves a nasty gotcha which users should be aware of. Consider the
 following benchmarks:
@@ -141,8 +149,6 @@ which [states]:
 > NOTE: We don't have a proper black box in stable Rust. This is a workaround implementation, that
 > may have a too big performance overhead, depending on operation, or it may fail to properly avoid
 > having code optimized out. It is good enough that it is used by default.
-
-However, it works well enough in my experience.
 */
 
 use std::f64;
@@ -205,6 +211,15 @@ pub fn bench<F, O>(f: F) -> Stats where F: Fn() -> O {
 /// same time. Probably best to keep it small.
 ///
 /// See `bench` and the module docs for more.
+///
+/// ## Overhead
+///
+/// Every iteration, `bench_env` performs a lookup into a big vector in order to get the
+/// environment for that iteration. If your benchmark is memory-intensive then this could, in the
+/// worst case, amount to a systematic cache-miss (ie. this vector would have to be fetched from
+/// DRAM at the start of every iteration). In this case the results could be affected by a hundred
+/// nanoseconds. This is a worst-case scenario however, and I haven't actually been able to trigger
+/// it in practice... but it's good to be aware of the possibility.
 pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Clone {
     let mut data = Vec::new();
     let bench_start = Instant::now(); // The time we started the benchmark (not used in results)
