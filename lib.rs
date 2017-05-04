@@ -145,8 +145,9 @@ which [states]:
 However, it works well enough in my experience.
 */
 
-use std::time::{Duration,Instant};
+use std::f64;
 use std::fmt::{self,Display,Formatter};
+use std::time::*;
 
 // Each time we take a sample we increase the number of iterations:
 //      iters = ITER_SCALE_FACTOR ^ sample_no
@@ -158,9 +159,8 @@ const BENCH_TIME_LIMIT_SECS: u64 = 1;
 /// Statistics for a benchmark run.
 #[derive(Debug)]
 pub struct Stats {
-    /// The gradient of the regression line.
-    ///
-    /// This gives us the time, in nanoseconds, per iteration.
+    /// The time, in nanoseconds, per iteration. If the benchmark generated fewer than 2 samples in
+    /// the allotted time then this will be NaN.
     pub ns_per_iter: f64,
     /// The coefficient of determination, R².
     ///
@@ -176,8 +176,13 @@ pub struct Stats {
 
 impl Display for Stats {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{:>10.0} ns   (R²={:.3}, {} iterations in {} samples)",
-            self.ns_per_iter, self.goodness_of_fit, self.iterations, self.samples)
+        if self.ns_per_iter.is_nan() {
+            write!(f, "Only generated {} sample(s) - we can't fit a regression line to that! \
+            Try making your benchmark faster.", self.samples)
+        } else {
+            write!(f, "{:>10.0} ns   (R²={:.3}, {} iterations in {} samples)",
+                self.ns_per_iter, self.goodness_of_fit, self.iterations, self.samples)
+        }
     }
 }
 
@@ -235,8 +240,9 @@ pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Cl
 /// Compute the OLS linear regression line for the given data set, returning the line's gradient
 /// and R². Requires at least 2 samples.
 fn regression(data: &[(usize, Duration)]) -> (f64, f64) {
-    assert!(data.len() > 1, "The dataset contains only {} sample(s) - we can't fit a regression \
-            line to that! Try making your benchmark smaller.", data.len());
+    if data.len() < 2 {
+        return (f64::NAN, f64::NAN);
+    }
     let data: Vec<(u64, u64)> = data.iter().map(|&(x,y)| (x as u64, as_nanos(y))).collect();
     let n = data.len() as f64;
     let nxbar  = data.iter().map(|&(x,_)| x  ).sum::<u64>(); // iter_time > 5e-11 ns
@@ -311,11 +317,11 @@ mod tests {
 
     #[test]
     fn very_quick() {
-        println!("{}", bench(|| {}));
+        println!("very quick: {}", bench(|| {}));
     }
 
-    #[test] #[should_panic]
+    #[test]
     fn very_slow() {
-        bench(|| thread::sleep(Duration::from_millis(500)));
+        println!("very slow: {}", bench(|| thread::sleep(Duration::from_millis(400))));
     }
 }
