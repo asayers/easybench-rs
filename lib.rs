@@ -339,4 +339,33 @@ mod tests {
     fn very_slow() {
         println!("very slow: {}", bench(|| thread::sleep(Duration::from_millis(400))));
     }
+
+    #[test]
+    fn test_sleep() {
+        println!("sleep 1 ms: {}", bench(|| thread::sleep(Duration::from_millis(1))));
+    }
+
+    #[test]
+    fn noop() {
+        println!("noop base:  {}", bench(                    | | {}));
+        println!("noop 0:     {}", bench_env(vec![0u64;0],   |_| {}));
+        println!("noop 16:    {}", bench_env(vec![0u64;16],  |_| {}));
+        println!("noop 64:    {}", bench_env(vec![0u64;64],  |_| {}));
+        println!("noop 256:   {}", bench_env(vec![0u64;256], |_| {}));
+        println!("noop 512:   {}", bench_env(vec![0u64;512], |_| {}));
+    }
+
+    #[test]
+    fn ret_value() {
+        println!("no ret 32:   {}", bench_env(vec![0u64;32],   |x| { x.clone() }));
+        println!("return 32:   {}", bench_env(vec![0u64;32],   |x| x.clone()));
+        println!("no ret 256:  {}", bench_env(vec![0u64;256],  |x| { x.clone() }));
+        println!("return 256:  {}", bench_env(vec![0u64;256],  |x| x.clone()));
+        println!("no ret 1024: {}", bench_env(vec![0u64;1024], |x| { x.clone() }));
+        println!("return 1024: {}", bench_env(vec![0u64;1024], |x| x.clone()));
+        println!("no ret 4096: {}", bench_env(vec![0u64;4096], |x| { x.clone() }));
+        println!("return 4096: {}", bench_env(vec![0u64;4096], |x| x.clone()));
+        println!("no ret 50000: {}", bench_env(vec![0u64;50000], |x| { x.clone() }));
+        println!("return 50000: {}", bench_env(vec![0u64;50000], |x| x.clone()));
+    }
 }
