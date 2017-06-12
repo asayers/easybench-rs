@@ -321,6 +321,7 @@ mod tests {
     // This is only here because doctests don't work with `--nocapture`.
     #[test] #[ignore]
     fn doctests_again() {
+        println!();
         println!("fib 200: {}", bench(|| fib(200) ));
         println!("fib 500: {}", bench(|| fib(500) ));
         println!("reverse: {}", bench_env(vec![0;100], |xs| xs.reverse()));
@@ -336,21 +337,25 @@ mod tests {
 
     #[test]
     fn very_quick() {
+        println!();
         println!("very quick: {}", bench(|| {}));
     }
 
     #[test]
     fn very_slow() {
+        println!();
         println!("very slow: {}", bench(|| thread::sleep(Duration::from_millis(400))));
     }
 
     #[test]
     fn test_sleep() {
+        println!();
         println!("sleep 1 ms: {}", bench(|| thread::sleep(Duration::from_millis(1))));
     }
 
     #[test]
     fn noop() {
+        println!();
         println!("noop base:  {}", bench(                    | | {}));
         println!("noop 0:     {}", bench_env(vec![0u64;0],   |_| {}));
         println!("noop 16:    {}", bench_env(vec![0u64;16],  |_| {}));
@@ -361,6 +366,7 @@ mod tests {
 
     #[test]
     fn ret_value() {
+        println!();
         println!("no ret 32:   {}", bench_env(vec![0u64;32],   |x| { x.clone() }));
         println!("return 32:   {}", bench_env(vec![0u64;32],   |x| x.clone()));
         println!("no ret 256:  {}", bench_env(vec![0u64;256],  |x| { x.clone() }));
