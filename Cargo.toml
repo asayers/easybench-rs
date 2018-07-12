@@ -14,3 +14,4 @@ name = "easybench"
 path = "lib.rs"
 
 [dependencies]
+humantime = "1.1.1"

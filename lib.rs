@@ -151,6 +151,8 @@ which [states]:
 > having code optimized out. It is good enough that it is used by default.
 */
 
+extern crate humantime;
+
 use std::f64;
 use std::fmt::{self,Display,Formatter};
 use std::time::*;
@@ -186,8 +188,10 @@ impl Display for Stats {
             write!(f, "Only generated {} sample(s) - we can't fit a regression line to that! \
             Try making your benchmark faster.", self.samples)
         } else {
-            write!(f, "{:>10.0} ns   (R²={:.3}, {} iterations in {} samples)",
-                self.ns_per_iter, self.goodness_of_fit, self.iterations, self.samples)
+            let per_iter: humantime::Duration = Duration::from_nanos(self.ns_per_iter as u64).into();
+            let per_iter = format!("{}", per_iter);
+            write!(f, "{:>11} (R²={:.3}, {} iterations in {} samples)",
+                per_iter, self.goodness_of_fit, self.iterations, self.samples)
         }
     }
 }
@@ -328,11 +332,11 @@ mod tests {
         println!("sort:    {}", bench_env(vec![0;100], |xs| xs.sort()));
 
         // This is fine:
-        println!("fib 1: {}", bench(|| fib(500) ));
+        println!("fib 1:   {}", bench(|| fib(500) ));
         // This is NOT fine:
-        println!("fib 2: {}", bench(|| { fib(500); } ));
+        println!("fib 2:   {}", bench(|| { fib(500); } ));
         // This is also fine, but a bit weird:
-        println!("fib 3: {}", bench_env(0, |x| { *x = fib(500); } ));
+        println!("fib 3:   {}", bench_env(0, |x| { *x = fib(500); } ));
     }
 
     #[test]
@@ -356,25 +360,25 @@ mod tests {
     #[test]
     fn noop() {
         println!();
-        println!("noop base:  {}", bench(                    | | {}));
-        println!("noop 0:     {}", bench_env(vec![0u64;0],   |_| {}));
-        println!("noop 16:    {}", bench_env(vec![0u64;16],  |_| {}));
-        println!("noop 64:    {}", bench_env(vec![0u64;64],  |_| {}));
-        println!("noop 256:   {}", bench_env(vec![0u64;256], |_| {}));
-        println!("noop 512:   {}", bench_env(vec![0u64;512], |_| {}));
+        println!("noop base: {}", bench(                    | | {}));
+        println!("noop 0:    {}", bench_env(vec![0u64;0],   |_| {}));
+        println!("noop 16:   {}", bench_env(vec![0u64;16],  |_| {}));
+        println!("noop 64:   {}", bench_env(vec![0u64;64],  |_| {}));
+        println!("noop 256:  {}", bench_env(vec![0u64;256], |_| {}));
+        println!("noop 512:  {}", bench_env(vec![0u64;512], |_| {}));
     }
 
     #[test]
     fn ret_value() {
         println!();
-        println!("no ret 32:   {}", bench_env(vec![0u64;32],   |x| { x.clone() }));
-        println!("return 32:   {}", bench_env(vec![0u64;32],   |x| x.clone()));
-        println!("no ret 256:  {}", bench_env(vec![0u64;256],  |x| { x.clone() }));
-        println!("return 256:  {}", bench_env(vec![0u64;256],  |x| x.clone()));
-        println!("no ret 1024: {}", bench_env(vec![0u64;1024], |x| { x.clone() }));
-        println!("return 1024: {}", bench_env(vec![0u64;1024], |x| x.clone()));
-        println!("no ret 4096: {}", bench_env(vec![0u64;4096], |x| { x.clone() }));
-        println!("return 4096: {}", bench_env(vec![0u64;4096], |x| x.clone()));
+        println!("no ret 32:    {}", bench_env(vec![0u64;32],   |x| { x.clone() }));
+        println!("return 32:    {}", bench_env(vec![0u64;32],   |x| x.clone()));
+        println!("no ret 256:   {}", bench_env(vec![0u64;256],  |x| { x.clone() }));
+        println!("return 256:   {}", bench_env(vec![0u64;256],  |x| x.clone()));
+        println!("no ret 1024:  {}", bench_env(vec![0u64;1024], |x| { x.clone() }));
+        println!("return 1024:  {}", bench_env(vec![0u64;1024], |x| x.clone()));
+        println!("no ret 4096:  {}", bench_env(vec![0u64;4096], |x| { x.clone() }));
+        println!("return 4096:  {}", bench_env(vec![0u64;4096], |x| x.clone()));
         println!("no ret 50000: {}", bench_env(vec![0u64;50000], |x| { x.clone() }));
         println!("return 50000: {}", bench_env(vec![0u64;50000], |x| x.clone()));
     }
