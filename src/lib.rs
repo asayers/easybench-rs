@@ -172,7 +172,7 @@ use std::time::*;
 const ITER_SCALE_FACTOR: f64 = 1.1;
 
 // We try to spend this many seconds (roughly) in total on each benchmark.
-const BENCH_TIME_LIMIT_SECS: u64 = 1;
+const BENCH_TIME_LIMIT: Duration = Duration::from_secs(1);
 
 /// Statistics for a benchmark run.
 #[derive(Debug, PartialEq, Clone)]
@@ -287,8 +287,8 @@ where
     // The time we started the benchmark (not used in results)
     let bench_start = Instant::now();
 
-    // Collect data until BENCH_TIME_LIMIT_SECS is reached.
-    while bench_start.elapsed() < Duration::from_secs(BENCH_TIME_LIMIT_SECS) {
+    // Collect data until BENCH_TIME_LIMIT is reached.
+    while bench_start.elapsed() < BENCH_TIME_LIMIT {
         let iters = ITER_SCALE_FACTOR.powi(data.len() as i32).round() as usize;
         // Prepare the environments - one per iteration
         let mut xs = Vec::with_capacity(iters);
