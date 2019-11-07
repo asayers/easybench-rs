@@ -291,10 +291,9 @@ where
     while bench_start.elapsed() < BENCH_TIME_LIMIT {
         let iters = ITER_SCALE_FACTOR.powi(data.len() as i32).round() as usize;
         // Prepare the environments - one per iteration
-        let mut xs = Vec::with_capacity(iters);
-        for _ in 0..iters {
-            xs.push(gen_env());
-        }
+        let mut xs = std::iter::repeat_with(&mut gen_env)
+            .take(iters)
+            .collect::<Vec<I>>();
         // Start the clock
         let iter_start = Instant::now();
         for i in 0..iters {
