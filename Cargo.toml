@@ -11,4 +11,4 @@ keywords = ["benchmark"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-humantime = "1.1.1"
+humantime = "1.3"
