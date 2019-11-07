@@ -9,9 +9,5 @@ readme = "README.md"
 keywords = ["benchmark"]
 license = "MIT OR Apache-2.0"
 
-[lib]
-name = "easybench"
-path = "lib.rs"
-
 [dependencies]
 humantime = "1.1.1"
