@@ -1,8 +1,9 @@
 [package]
 name = "easybench"
 version = "0.1.4"
-authors = ["Alex Sayers <alex.sayers@gmail.com>"]
+authors = ["Alex Sayers <alex@asayers.com>"]
 description = "A lightweight benchmarking library"
+edition = "2018"
 documentation = "https://docs.rs/easybench/"
 repository = "https://github.com/asayers/easybench-rs"
 readme = "README.md"
