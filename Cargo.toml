@@ -1,6 +1,6 @@
 [package]
 name = "easybench"
-version = "0.1.4"
+version = "1.0.0"
 authors = ["Alex Sayers <alex@asayers.com>"]
 description = "A lightweight benchmarking library"
 edition = "2018"
