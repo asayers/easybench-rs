@@ -348,11 +348,8 @@ fn regression(data: &[(usize, Duration)]) -> (f64, f64) {
 
 // Panics if x is longer than 584 years (1.8e10 seconds)
 fn as_nanos(x: Duration) -> u64 {
-    x.as_secs()
-        .checked_mul(1_000_000_000)
-        .expect("overflow: Duration was longer than 584 years")
-        .checked_add(x.subsec_nanos() as u64)
-        .unwrap()
+    use std::convert::TryFrom;
+    u64::try_from(x.as_nanos()).expect("overflow: Duration was longer than 584 years")
 }
 
 // Stolen from `bencher`, where it's known as `black_box`.
