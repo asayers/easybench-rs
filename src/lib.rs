@@ -296,9 +296,11 @@ where
             .collect::<Vec<I>>();
         // Start the clock
         let iter_start = Instant::now();
-        for i in 0..iters {
-            let ref mut x = xs[i]; // Lookup the env for this iteration
-            pretend_to_use(f(x)); // Run the code and pretend to use the output
+        // We iterate over `&mut xs` rather than draining it, because we
+        // don't want to drop the env values until after the clock has stopped.
+        for x in &mut xs {
+            // Run the code and pretend to use the output
+            pretend_to_use(f(x));
         }
         let time = iter_start.elapsed();
         data.push((iters, time));
