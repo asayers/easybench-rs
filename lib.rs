@@ -225,13 +225,47 @@ pub fn bench<F, O>(f: F) -> Stats where F: Fn() -> O {
 /// nanoseconds. This is a worst-case scenario however, and I haven't actually been able to trigger
 /// it in practice... but it's good to be aware of the possibility.
 pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Clone {
+    bench_gen_env(move || { env.clone() }, f)
+}
+/// Run a benchmark with a generated environment.
+///
+/// The function `gen_env` creates the "benchmark environment" for the
+/// computation. Each iteration receives a freshly-created
+/// environment. The time taken to create the environment is not
+/// included in the results.
+///
+/// Nb: it's very possible that we will end up generating many
+/// (>10,000) copies of `env` at the same time. Probably best to keep
+/// it small.
+///
+/// See `bench` and the module docs for more.
+///
+/// ## Overhead
+///
+/// Every iteration, `bench_gen_env` performs a lookup into a big
+/// vector in order to get the environment for that iteration. If your
+/// benchmark is memory-intensive then this could, in the worst case,
+/// amount to a systematic cache-miss (ie. this vector would have to
+/// be fetched from DRAM at the start of every iteration). In this
+/// case the results could be affected by a hundred nanoseconds. This
+/// is a worst-case scenario however, and I haven't actually been able
+/// to trigger it in practice... but it's good to be aware of the
+/// possibility.
+pub fn bench_gen_env<G, F, I, O>(mut gen_env: G, f: F) -> Stats
+    where G: FnMut() -> I,
+          F: Fn(&mut I) -> O,
+{
     let mut data = Vec::new();
     let bench_start = Instant::now(); // The time we started the benchmark (not used in results)
 
     // Collect data until BENCH_TIME_LIMIT_SECS is reached.
     while bench_start.elapsed() < Duration::from_secs(BENCH_TIME_LIMIT_SECS) {
         let iters = ITER_SCALE_FACTOR.powi(data.len() as i32).round() as usize;
-        let mut xs = vec![env.clone();iters]; // Prepare the environments - one per iteration
+        // Prepare the environments - one per iteration
+        let mut xs = Vec::with_capacity(iters);
+        for _ in 0..iters {
+            xs.push(gen_env());
+        }
         let iter_start = Instant::now();      // Start the clock
         for i in 0..iters {
             let ref mut x = xs[i];            // Lookup the env for this iteration
