@@ -341,17 +341,7 @@ where
 /// Statistics for a benchmark run determining the scaling of a function.
 #[derive(Debug, PartialEq, Clone)]
 pub struct ScalingStats {
-    /// The scaling exponent
-    /// If this is 2, for instance, you have an O(N²) algorithm.
-    pub scaling: usize,
-    /// The time, in nanoseconds, per scaled size of the problem. If
-    /// the problem scales as O(N²) for instance, this is the number
-    /// of nanoseconds per N².
-    pub ns_per_scale: f64,
-    /// The coefficient of determination, R².
-    ///
-    /// This is an indication of how noisy the benchmark was, where 1 is
-    /// good and 0 is bad. Be suspicious of values below 0.9.
+    pub scaling: Scaling,
     pub goodness_of_fit: f64,
     /// How many times the benchmarked code was actually run.
     pub iterations: usize,
@@ -359,30 +349,65 @@ pub struct ScalingStats {
     /// environment and measured the time).
     pub samples: usize,
 }
+/// The timing and scaling results (without statistics) for a benchmark.
+#[derive(Debug, PartialEq, Clone)]
+pub struct Scaling {
+    /// The scaling exponent
+    /// If this is 2, for instance, you have an O(N²) algorithm.
+    pub exponent: usize,
+    /// The time, in nanoseconds, per scaled size of the problem. If
+    /// the problem scales as O(N²) for instance, this is the number
+    /// of nanoseconds per N².
+    pub ns_per_scale: f64,
+}
 
 impl Display for ScalingStats {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{} (R²={:.3}, {} iterations in {} samples)",
+            self.scaling, self.goodness_of_fit, self.iterations, self.samples
+        )
+    }
+}
+impl Display for Scaling {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let per_iter: humantime::Duration =
             Duration::from_nanos(self.ns_per_scale as u64).into();
         let per_iter = format!("{}", per_iter);
-        let exponent = match self.scaling {
-            0 => "iter".to_string(),
-            1 => "N".to_string(),
-            2 => "N²".to_string(),
-            3 => "N³".to_string(),
-            4 => "N⁴".to_string(),
-            5 => "N⁵".to_string(),
-            6 => "N⁶".to_string(),
-            7 => "N⁷".to_string(),
-            8 => "N⁸".to_string(),
-            9 => "N⁹".to_string(),
-            _ => format!("^{}", self.scaling),
-        };
-        write!(
-            f,
-            "{:>11}/{} (R²={:.3}, {} iterations in {} samples)",
-            per_iter, exponent, self.goodness_of_fit, self.iterations, self.samples
-        )
+        match self.exponent {
+            0 => write!(f, "{:>11}/iter", per_iter),
+            1 => write!(f, "{:>11}/N", per_iter),
+            2 => write!(f, "{:>11}/N²", per_iter),
+            3 => write!(f, "{:>11}/N³", per_iter),
+            4 => write!(f, "{:>11}/N⁴", per_iter),
+            5 => write!(f, "{:>11}/N⁵", per_iter),
+            6 => write!(f, "{:>11}/N⁶", per_iter),
+            7 => write!(f, "{:>11}/N⁷", per_iter),
+            8 => write!(f, "{:>11}/N⁸", per_iter),
+            9 => write!(f, "{:>11}/N⁹", per_iter),
+            _ => write!(f, "{:>11}/N^{}", per_iter, self.exponent),
+        }
+    }
+}
+impl Scaling {
+    pub fn short(&self) -> impl Display {
+        let per_iter: humantime::Duration =
+            Duration::from_nanos(self.ns_per_scale as u64).into();
+        let per_iter = format!("{}", per_iter);
+        match self.exponent {
+            0 => format!("{}/iter", per_iter),
+            1 => format!("{}/N", per_iter),
+            2 => format!("{}/N²", per_iter),
+            3 => format!("{}/N³", per_iter),
+            4 => format!("{}/N⁴", per_iter),
+            5 => format!("{}/N⁵", per_iter),
+            6 => format!("{}/N⁶", per_iter),
+            7 => format!("{}/N⁷", per_iter),
+            8 => format!("{}/N⁸", per_iter),
+            9 => format!("{}/N⁹", per_iter),
+            _ => format!("^{}", self.exponent),
+        }
     }
 }
 
@@ -441,8 +466,10 @@ where
                     .map(|(n,i,t)| { (n.pow(pow)*i, *t) }).collect();
                 let (grad, r2) = regression(&pdata);
                 stats.push(ScalingStats {
-                    scaling: pow as usize,
-                    ns_per_scale: grad,
+                    scaling: Scaling {
+                        exponent: pow as usize,
+                        ns_per_scale: grad,
+                    },
                     goodness_of_fit: r2,
                     iterations: data[1..].iter().map(|&(x, _, _)| x).sum(),
                     samples: data[1..].len(),
@@ -558,40 +585,40 @@ mod tests {
     #[test]
     fn scales_o_one() {
         println!();
-        let scaling = bench_power_scaling(
+        let stats = bench_power_scaling(
             |n| {n},
             |_| { thread::sleep(Duration::from_millis(10)) },
             1, 1000);
-        println!("O(N): {}", scaling);
-        assert_eq!(scaling.scaling, 0);
-        println!("   error: {:e}", scaling.ns_per_scale - 1e7);
-        assert!((scaling.ns_per_scale - 1e7).abs() < 2e5);
+        println!("O(N): {}", stats);
+        assert_eq!(stats.scaling.exponent, 0);
+        println!("   error: {:e}", stats.scaling.ns_per_scale - 1e7);
+        assert!((stats.scaling.ns_per_scale - 1e7).abs() < 2e5);
     }
 
     #[test]
     fn scales_o_n() {
         println!();
-        let scaling = bench_power_scaling(
+        let stats = bench_power_scaling(
             |n| {n},
             |&mut n| { thread::sleep(Duration::from_millis(n as u64)) },
             1, 1000);
-        println!("O(N): {}", scaling);
-        assert_eq!(scaling.scaling, 1);
-        println!("   error: {:e}", scaling.ns_per_scale - 1e6);
-        assert!((scaling.ns_per_scale - 1e6).abs() < 1e4);
+        println!("O(N): {}", stats);
+        assert_eq!(stats.scaling.exponent, 1);
+        println!("   error: {:e}", stats.scaling.ns_per_scale - 1e6);
+        assert!((stats.scaling.ns_per_scale - 1e6).abs() < 1e4);
     }
 
     #[test]
     fn scales_o_n_square() {
         println!();
-        let scaling = bench_power_scaling(
+        let stats = bench_power_scaling(
             |n| {n},
             |&mut n| { thread::sleep(Duration::from_millis((n*n) as u64)) },
             1, 100);
-        println!("O(N): {}", scaling);
-        assert_eq!(scaling.scaling, 2);
-        println!("   error: {:e}", scaling.ns_per_scale - 1e6);
-        assert!((scaling.ns_per_scale - 1e6).abs() < 1e4);
+        println!("O(N): {}", stats);
+        assert_eq!(stats.scaling.exponent, 2);
+        println!("   error: {:e}", stats.scaling.ns_per_scale - 1e6);
+        assert!((stats.scaling.ns_per_scale - 1e6).abs() < 1e4);
     }
 
     #[test]
