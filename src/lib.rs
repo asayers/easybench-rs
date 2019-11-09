@@ -174,6 +174,10 @@ use std::time::*;
 //      iters = ITER_SCALE_FACTOR ^ sample_no
 const ITER_SCALE_FACTOR: f64 = 1.1;
 
+// Each time we take a sample we increase the number `n`:
+//      n = N_SCALE_FACTOR ^ sample_no
+const N_SCALE_FACTOR: f64 = 1.5;
+
 // We try to spend at most this many seconds (roughly) in total on
 // each benchmark.
 const BENCH_TIME_MAX: Duration = Duration::from_secs(10);
@@ -334,6 +338,127 @@ where
     }
 }
 
+/// Statistics for a benchmark run determining the scaling of a function.
+#[derive(Debug, PartialEq, Clone)]
+pub struct ScalingStats {
+    /// The scaling exponent
+    /// If this is 2, for instance, you have an O(N²) algorithm.
+    pub scaling: usize,
+    /// The time, in nanoseconds, per scaled size of the problem. If
+    /// the problem scales as O(N²) for instance, this is the number
+    /// of nanoseconds per N².
+    pub ns_per_scale: f64,
+    /// The coefficient of determination, R².
+    ///
+    /// This is an indication of how noisy the benchmark was, where 1 is
+    /// good and 0 is bad. Be suspicious of values below 0.9.
+    pub goodness_of_fit: f64,
+    /// How many times the benchmarked code was actually run.
+    pub iterations: usize,
+    /// How many samples were taken (ie. how many times we allocated the
+    /// environment and measured the time).
+    pub samples: usize,
+}
+
+impl Display for ScalingStats {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let per_iter: humantime::Duration =
+            Duration::from_nanos(self.ns_per_scale as u64).into();
+        let per_iter = format!("{}", per_iter);
+        let exponent = match self.scaling {
+            0 => "iter".to_string(),
+            1 => "N".to_string(),
+            2 => "N²".to_string(),
+            3 => "N³".to_string(),
+            4 => "N⁴".to_string(),
+            5 => "N⁵".to_string(),
+            6 => "N⁶".to_string(),
+            7 => "N⁷".to_string(),
+            8 => "N⁸".to_string(),
+            9 => "N⁹".to_string(),
+            _ => format!("^{}", self.scaling),
+        };
+        write!(
+            f,
+            "{:>11}/{} (R²={:.3}, {} iterations in {} samples)",
+            per_iter, exponent, self.goodness_of_fit, self.iterations, self.samples
+        )
+    }
+}
+
+/// Benchmark the power-law scaling of the function
+///
+/// This function assumes that the function scales as an integer power
+/// of N, with the power not worse than O(N⁴).  It measures the power
+/// based on n R² goodness of fit parameter.
+pub fn bench_power_scaling<G, F, I, O>(mut gen_env: G, f: F, nmin: usize, nmax: usize) -> ScalingStats
+where
+    G: FnMut(usize) -> I,
+    F: Fn(&mut I) -> O,
+{
+    let nmin = nmin as f64;
+    let mut data = Vec::new();
+    // The time we started the benchmark (not used in results)
+    let bench_start = Instant::now();
+
+    // Collect data until BENCH_TIME_MAX is reached.
+    for iterlog_plus_n in 0i32.. {
+        for iterlog in 0..iterlog_plus_n {
+            let iters = ITER_SCALE_FACTOR.powi(iterlog).round() as usize;
+            let n = (nmin*N_SCALE_FACTOR.powi(iterlog_plus_n-iterlog)).ceil() as usize;
+            if n > nmax {
+                continue;
+            }
+            // Prepare the environments - one per iteration
+            let mut xs = std::iter::repeat_with(|| { gen_env(n) })
+                .take(iters)
+                .collect::<Vec<I>>();
+            // Start the clock
+            let iter_start = Instant::now();
+            // We iterate over `&mut xs` rather than draining it, because we
+            // don't want to drop the env values until after the clock has stopped.
+            for x in &mut xs {
+                // Run the code and pretend to use the output
+                pretend_to_use(f(x));
+            }
+            let time = iter_start.elapsed();
+            data.push((n, iters, time));
+        }
+
+        let elapsed = bench_start.elapsed();
+        if elapsed > BENCH_TIME_MIN && data.len() > 4 {
+            // If the first iter in a sample is consistently slow, that's fine -
+            // that's why we do the linear regression. If the first sample is slower
+            // than the rest, however, that's not fine.  Therefore, we discard the
+            // first sample as a cache-warming exercise.
+
+            // Compute some stats for each of several different
+            // powers, to see which seems most accurate.
+            let mut stats = Vec::new();
+            let mut bestpow = 0;
+            for pow in 0..5 {
+                let pdata: Vec<_> = data[1..].iter()
+                    .map(|(n,i,t)| { (n.pow(pow)*i, *t) }).collect();
+                let (grad, r2) = regression(&pdata);
+                stats.push(ScalingStats {
+                    scaling: pow as usize,
+                    ns_per_scale: grad,
+                    goodness_of_fit: r2,
+                    iterations: data[1..].iter().map(|&(x, _, _)| x).sum(),
+                    samples: data[1..].len(),
+                });
+                if r2 > stats[bestpow].goodness_of_fit {
+                    bestpow = pow as usize;
+                }
+            }
+            if elapsed > BENCH_TIME_MAX || stats[bestpow].goodness_of_fit > 0.99 {
+                return stats[bestpow].clone();
+            }
+        }
+    }
+    unreachable!()
+}
+
 /// Compute the OLS linear regression line for the given data set, returning
 /// the line's gradient and R². Requires at least 2 samples.
 //
@@ -428,6 +553,45 @@ mod tests {
                 *x = fib(500);
             })
         );
+    }
+
+    #[test]
+    fn scales_o_one() {
+        println!();
+        let scaling = bench_power_scaling(
+            |n| {n},
+            |_| { thread::sleep(Duration::from_millis(10)) },
+            1, 1000);
+        println!("O(N): {}", scaling);
+        assert_eq!(scaling.scaling, 0);
+        println!("   error: {:e}", scaling.ns_per_scale - 1e7);
+        assert!((scaling.ns_per_scale - 1e7).abs() < 2e5);
+    }
+
+    #[test]
+    fn scales_o_n() {
+        println!();
+        let scaling = bench_power_scaling(
+            |n| {n},
+            |&mut n| { thread::sleep(Duration::from_millis(n as u64)) },
+            1, 1000);
+        println!("O(N): {}", scaling);
+        assert_eq!(scaling.scaling, 1);
+        println!("   error: {:e}", scaling.ns_per_scale - 1e6);
+        assert!((scaling.ns_per_scale - 1e6).abs() < 1e4);
+    }
+
+    #[test]
+    fn scales_o_n_square() {
+        println!();
+        let scaling = bench_power_scaling(
+            |n| {n},
+            |&mut n| { thread::sleep(Duration::from_millis((n*n) as u64)) },
+            1, 100);
+        println!("O(N): {}", scaling);
+        assert_eq!(scaling.scaling, 2);
+        println!("   error: {:e}", scaling.ns_per_scale - 1e6);
+        assert!((scaling.ns_per_scale - 1e6).abs() < 1e4);
     }
 
     #[test]
