@@ -43,9 +43,10 @@ An *iteration* is a single execution of your code. A *sample* is a measurement,
 during which your code may be run many times. In other words: taking a sample
 means performing some number of iterations and measuring the total time.
 
-The first sample we take performs only 1 iteration, but as we continue taking
-samples we increase the number of iterations exponentially. We stop when a
-global time limit is reached (currently 1 second).
+The first sample we take performs only 1 iteration, but as we continue
+taking samples we increase the number of iterations with increasing
+rapidity. We stop when a global time limit is reached (currently 1
+second).
 
 If a benchmark must mutate some state while running, before taking a sample
 `n` copies of the initial state are prepared, where `n` is the number of
@@ -167,10 +168,6 @@ use std::f64;
 use std::fmt::{self, Display, Formatter};
 use std::time::*;
 
-// Each time we take a sample we increase the number of iterations:
-//      iters = ITER_SCALE_FACTOR ^ sample_no
-const ITER_SCALE_FACTOR: f64 = 1.1;
-
 // We try to spend this many seconds (roughly) in total on each benchmark.
 const BENCH_TIME_LIMIT: Duration = Duration::from_secs(1);
 
@@ -287,9 +284,10 @@ where
     // The time we started the benchmark (not used in results)
     let bench_start = Instant::now();
 
+    let mut fib = SlowFib::new();
     // Collect data until BENCH_TIME_LIMIT is reached.
     while bench_start.elapsed() < BENCH_TIME_LIMIT {
-        let iters = ITER_SCALE_FACTOR.powi(data.len() as i32).round() as usize;
+        let iters = fib.next().unwrap();
         // Prepare the environments - one per iteration
         let mut xs = std::iter::repeat_with(&mut gen_env)
             .take(iters)
@@ -494,4 +492,77 @@ mod tests {
             bench_env(vec![0u64; 50000], |x| x.clone())
         );
     }
+}
+
+// Each time we take a sample we increase the number of iterations
+// using a slow version of the Fibonacci sequence, which
+// asymptotically increases with a power of 1.1.  This was chosen to
+// match the prior behavior of the library.  The advantage of this
+// approach is that it does not repeat 1 more than twice (once for
+// warmup) and thus provides nicer statistics.
+const BENCH_SCALE_TIME: usize = 25;
+struct SlowFib {
+    which: usize,
+    buffer: [usize; BENCH_SCALE_TIME],
+}
+impl SlowFib {
+    fn new() -> Self {
+        let mut buffer = [1; BENCH_SCALE_TIME];
+        // buffer needs just the two zeros to make it start with two 1
+        // values.  The rest should be 1s.
+        buffer[1] = 0;
+        buffer[2] = 0;
+        SlowFib {
+            which: 0,
+            buffer,
+        }
+    }
+}
+impl Iterator for SlowFib {
+    type Item = usize;
+    fn next(&mut self) -> Option<usize> {
+        let oldwhich = self.which;
+        self.which = (self.which + 1) % BENCH_SCALE_TIME;
+        self.buffer[self.which] = self.buffer[oldwhich] + self.buffer[self.which];
+        Some(self.buffer[self.which])
+    }
+}
+#[test]
+fn test_fib() {
+    // The following code was used to demonstrate that asymptotically
+    // the SlowFib grows as the 1.1 power, just as the old code.  It
+    // differs in that it increases linearly at the beginning, which
+    // leads to larger numbers earlier in the sequence.  It also
+    // differs in that it does not repeat any numbers in the sequence,
+    // which hopefully leads to better linear regression, particularly
+    // if we can only run a few iterations.
+    let mut prev = 1;
+    for x in SlowFib::new().take(200) {
+        let rat = x as f64 / prev as f64;
+        println!("ratio: {}/{} = {}", prev, x, rat);
+        prev = x;
+    }
+    let five: Vec<_> = SlowFib::new().take(5).collect();
+    assert_eq!(&five, &[1,1,2,3,4]);
+    let more: Vec<_> = SlowFib::new().take(32).collect();
+    assert_eq!(&more,
+               &[ 1, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+                 10,11,12,13,14,15,16,17,18,19,
+                 20,21,22,23,24,25,26,28,31,35,
+                 40,46,
+               ]);
+    let previous_sequence: Vec<_> =
+        (0..32).map(|n| (1.1f64).powi(n).round() as usize).collect();
+    assert_eq!(&previous_sequence,
+               &[ 1, 1, 1, 1, 1, 2, 2, 2, 2, 2,
+                  3, 3, 3, 3, 4, 4, 5, 5, 6, 6,
+                  7, 7, 8, 9,10,11,12,13,14,16,
+                 17,19,
+               ]);
+    let previous_sequence: Vec<_> =
+        (20..40).map(|n| (1.1f64).powi(n).round() as usize).collect();
+    assert_eq!(&previous_sequence,
+               &[ 7, 7, 8, 9,10,11,12,13,14,16,
+                 17,19,21,23,26,28,31,34,37,41,
+               ]);
 }
