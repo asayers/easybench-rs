@@ -335,7 +335,10 @@ fn regression(data: &[(usize, Duration)]) -> (f64, f64) {
     // Do all the arithmetic using f64, because it can happen that the
     // squared numbers to overflow using integer arithmetic if the
     // tests are too fast (so we run too many iterations).
-    let data: Vec<_> = data.iter().map(|&(x, y)| (x as f64, as_nanos(y) as f64)).collect();
+    let data: Vec<_> = data
+        .iter()
+        .map(|&(x, y)| (x as f64, y.as_nanos() as f64))
+        .collect();
     let n = data.len() as f64;
     let nxbar = data.iter().map(|&(x, _)| x).sum::<f64>(); // iter_time > 5e-11 ns
     let nybar = data.iter().map(|&(_, y)| y).sum::<f64>(); // TIME_LIMIT < 2 ^ 64 ns
@@ -349,12 +352,6 @@ fn regression(data: &[(usize, Duration)]) -> (f64, f64) {
     let r2 = (ncovar * ncovar) / (nxvar * nyvar);
     assert!(r2.is_nan() || r2 <= 1.0);
     (gradient, r2)
-}
-
-// Panics if x is longer than 584 years (1.8e10 seconds)
-fn as_nanos(x: Duration) -> u64 {
-    use std::convert::TryFrom;
-    u64::try_from(x.as_nanos()).expect("overflow: Duration was longer than 584 years")
 }
 
 // Stolen from `bencher`, where it's known as `black_box`.
