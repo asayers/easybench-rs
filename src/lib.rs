@@ -220,9 +220,9 @@ impl Display for Stats {
 /// thinking we're going to use it. Make sure to return enough information
 /// to prevent the optimiser from eliminating code from your benchmark! (See
 /// the module docs for more.)
-pub fn bench<F, O>(f: F) -> Stats
+pub fn bench<F, O>(mut f: F) -> Stats
 where
-    F: Fn() -> O,
+    F: FnMut() -> O,
 {
     bench_env((), |_| f())
 }
@@ -251,7 +251,7 @@ where
 /// good to be aware of the possibility.
 pub fn bench_env<F, I, O>(env: I, f: F) -> Stats
 where
-    F: Fn(&mut I) -> O,
+    F: FnMut(&mut I) -> O,
     I: Clone,
 {
     bench_gen_env(move || env.clone(), f)
@@ -278,10 +278,10 @@ where
 /// affected by a hundred nanoseconds. This is a worst-case scenario however,
 /// and I haven't actually been able to trigger it in practice... but it's
 /// good to be aware of the possibility.
-pub fn bench_gen_env<G, F, I, O>(mut gen_env: G, f: F) -> Stats
+pub fn bench_gen_env<G, F, I, O>(mut gen_env: G, mut f: F) -> Stats
 where
     G: FnMut() -> I,
-    F: Fn(&mut I) -> O,
+    F: FnMut(&mut I) -> O,
 {
     let mut data = Vec::new();
     // The time we started the benchmark (not used in results)
