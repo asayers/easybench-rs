@@ -9,6 +9,3 @@ repository = "https://github.com/asayers/easybench-rs"
 readme = "README.md"
 keywords = ["benchmark"]
 license = "MIT OR Apache-2.0"
-
-[dependencies]
-humantime = "1.3"

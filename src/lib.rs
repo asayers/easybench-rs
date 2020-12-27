@@ -161,8 +161,6 @@ is stolen from [bencher], which [states]:
 > is good enough that it is used by default.
 */
 
-extern crate humantime;
-
 use std::f64;
 use std::fmt::{self, Display, Formatter};
 use std::time::*;
@@ -202,9 +200,8 @@ impl Display for Stats {
                 self.samples
             )
         } else {
-            let per_iter: humantime::Duration =
-                Duration::from_nanos(self.ns_per_iter as u64).into();
-            let per_iter = format!("{}", per_iter);
+            let per_iter = Duration::from_nanos(self.ns_per_iter as u64);
+            let per_iter = format!("{:?}", per_iter);
             write!(
                 f,
                 "{:>11} (R²={:.3}, {} iterations in {} samples)",
