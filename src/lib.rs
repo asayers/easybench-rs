@@ -297,7 +297,7 @@ where
         // don't want to drop the env values until after the clock has stopped.
         for x in &mut xs {
             // Run the code and pretend to use the output
-            pretend_to_use(f(x));
+            std::hint::black_box(f(x));
         }
         let time = iter_start.elapsed();
         data.push((iters, time));
@@ -349,23 +349,6 @@ fn regression(data: &[(usize, Duration)]) -> (f64, f64) {
     let r2 = (ncovar * ncovar) / (nxvar * nyvar);
     assert!(r2.is_nan() || r2 <= 1.0);
     (gradient, r2)
-}
-
-// Stolen from `bencher`, where it's known as `black_box`.
-//
-// NOTE: We don't have a proper black box in stable Rust. This is a workaround
-// implementation, that may have a too big performance overhead, depending
-// on operation, or it may fail to properly avoid having code optimized
-// out. It is good enough that it is used by default.
-//
-// A function that is opaque to the optimizer, to allow benchmarks to pretend
-// to use outputs to assist in avoiding dead-code elimination.
-fn pretend_to_use<T>(dummy: T) -> T {
-    unsafe {
-        let ret = ::std::ptr::read_volatile(&dummy);
-        ::std::mem::forget(dummy);
-        ret
-    }
 }
 
 #[cfg(test)]
