@@ -62,15 +62,13 @@ noise there is in the data.
 ## Caveat 1: Harness overhead
 
 **TL;DR: Compile with `--release`; the overhead is likely to be within the
-**noise of your
-benchmark.**
+noise of your benchmark.**
 
 Any work which easybench does once-per-sample is ignored (this is the purpose of the linear
 regression technique described above). However, work which is done once-per-iteration *will* be
 counted in the final times.
 
-* In the case of [`bench`] this amounts to incrementing the loop counter and
-  [copying the return value](#bonus-caveat-black-box).
+* In the case of [`bench`] this amounts to incrementing the loop counter.
 * In the case of [`bench_env`], we also do a lookup into a big vector in
   order to get the environment for that iteration.
 * If you compile your program unoptimised, there may be additional overhead.
@@ -146,19 +144,6 @@ it away. This is why `fib_1` is safe from having code accidentally eliminated.
 In the case of `fib_3`, we actually *do* use the return value: each
 iteration we take the result of `fib(500)` and store it in the iteration's
 environment. This has the desired effect, but looks a bit weird.
-
-## Bonus caveat: Black box
-
-The function which easybench uses to trick the optimiser (`black_box`)
-is stolen from [bencher], which [states]:
-
-[bencher]: https://docs.rs/bencher/
-[states]: https://docs.rs/bencher/0.1.2/bencher/fn.black_box.html
-
-> NOTE: We don't have a proper black box in stable Rust. This is a workaround
-> implementation, that may have a too big performance overhead, depending on
-> operation, or it may fail to properly avoid having code optimized out. It
-> is good enough that it is used by default.
 */
 
 use std::f64;
