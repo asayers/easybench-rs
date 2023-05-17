@@ -43,9 +43,11 @@ An *iteration* is a single execution of your code. A *sample* is a measurement,
 during which your code may be run many times. In other words: taking a sample
 means performing some number of iterations and measuring the total time.
 
-The first sample we take performs only 1 iteration, but as we continue taking
-samples we increase the number of iterations exponentially. We stop when a
-global time limit is reached (currently 1 second).
+The first sample we take performs only 1 iteration, but as we continue
+taking samples we increase the number of iterations exponentially. We
+stop either when a global time limit is reached (currently 10 seconds),
+or when we have collected sufficient statistics (but have run for at
+least a millisecond).
 
 If a benchmark must mutate some state while running, before taking a sample
 `n` copies of the initial state are prepared, where `n` is the number of
@@ -89,11 +91,12 @@ under 100 lines of code, so it's pretty easy to read.
 
 ## Caveat 2: Sufficient data
 
-**TL;DR: Measurements are unreliable when code takes too long (> 1 ms) to run.**
+**TL;DR: Measurements are unreliable when code takes too long (> 10 ms) to run.**
 
-Each benchmark collects data for 1 second. This means that in order to
-collect a statistically significant amount of data, your code should run
-much faster than this.
+Each benchmark collects data for at least 1 millisecond and not much
+more than ten seconds. This means that in order to collect a
+statistically significant amount of data, your code should run much
+faster than this.
 
 When inspecting the results, make sure things look statistically
 significant. In particular:
@@ -154,8 +157,12 @@ use std::time::*;
 //      iters = ITER_SCALE_FACTOR ^ sample_no
 const ITER_SCALE_FACTOR: f64 = 1.1;
 
-// We try to spend this many seconds (roughly) in total on each benchmark.
-const BENCH_TIME_LIMIT: Duration = Duration::from_secs(1);
+// We try to spend at most this many seconds (roughly) in total on
+// each benchmark.
+const BENCH_TIME_MAX: Duration = Duration::from_secs(10);
+// We try to spend at least this many seconds in total on each
+// benchmark.
+const BENCH_TIME_MIN: Duration = Duration::from_millis(1);
 
 /// Statistics for a benchmark run.
 #[derive(Debug, PartialEq, Clone)]
@@ -269,8 +276,8 @@ where
     // The time we started the benchmark (not used in results)
     let bench_start = Instant::now();
 
-    // Collect data until BENCH_TIME_LIMIT is reached.
-    while bench_start.elapsed() < BENCH_TIME_LIMIT {
+    // Collect data until BENCH_TIME_MAX is reached.
+    loop {
         let iters = ITER_SCALE_FACTOR.powi(data.len() as i32).round() as usize;
         // Prepare the environments - one per iteration
         let mut xs = std::iter::repeat_with(&mut gen_env)
@@ -286,21 +293,26 @@ where
         }
         let time = iter_start.elapsed();
         data.push((iters, time));
-    }
 
-    // If the first iter in a sample is consistently slow, that's fine -
-    // that's why we do the linear regression. If the first sample is slower
-    // than the rest, however, that's not fine.  Therefore, we discard the
-    // first sample as a cache-warming exercise.
-    data.remove(0);
+        let elapsed = bench_start.elapsed();
+        if elapsed > BENCH_TIME_MIN && data.len() > 3 {
+            // If the first iter in a sample is consistently slow, that's fine -
+            // that's why we do the linear regression. If the first sample is slower
+            // than the rest, however, that's not fine.  Therefore, we discard the
+            // first sample as a cache-warming exercise.
 
-    // Compute some stats
-    let (grad, r2) = regression(&data[..]);
-    Stats {
-        ns_per_iter: grad,
-        goodness_of_fit: r2,
-        iterations: data.iter().map(|&(x, _)| x).sum(),
-        samples: data.len(),
+            // Compute some stats
+            let (grad, r2) = regression(&data[1..]);
+            let stats = Stats {
+                ns_per_iter: grad,
+                goodness_of_fit: r2,
+                iterations: data[1..].iter().map(|&(x, _)| x).sum(),
+                samples: data[1..].len(),
+            };
+            if elapsed > BENCH_TIME_MAX || r2 > 0.99 {
+                return stats;
+            }
+        }
     }
 }
 
